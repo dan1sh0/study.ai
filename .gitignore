@@ -1,0 +1,24 @@
+# Node.js dependencies
+node_modules/
+
+# Python virtual environment
+venv/
+
+# Uploaded files
+uploads/
+
+# Environment variables
+.env
+
+# macOS system files
+.DS_Store
+
+# Log files
+*.log
+
+# Python cache
+__pycache__/
+
+# VSCode settings
+.vscode/
+
