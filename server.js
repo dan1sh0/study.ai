@@ -7,6 +7,9 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const app = express();
 const path = require('path');
+require('dotenv').config();
+const openai = require('openai');
+
 
 
 app.use(cors());
@@ -70,6 +73,23 @@ app.post('/upload', upload.single('video'), (req, res) => {
     res.status(400).json({ message: 'Video upload failed' });
   }
 });
+
+
+// Endpoint to handle AI requests
+app.post('/ai-process', async (req, res) => {
+  try {
+    const { transcription, requestType } = req.body;
+
+    // Call the AI processing function
+    const response = await processAIRequest(transcription, requestType);
+
+    res.json({ response });
+  } catch (error) {
+    console.error('Error processing AI request:', error);
+    res.status(500).json({ message: 'An error occurred while processing your request.' });
+  }
+});
+
 
 // Start the Server
 const PORT = process.env.PORT || 5002;
