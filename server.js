@@ -1,29 +1,38 @@
 // server.js
 // At the top of server.js
-const { spawn } = require('child_process');
-const express = require('express');
-const multer = require('multer');
-const cors = require('cors');
-const dotenv = require('dotenv');
+
+import express from 'express';
+import cors from 'cors';
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
+import multer from 'multer';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+import { spawn } from 'child_process';
+
+dotenv.config();
+
 const app = express();
-const path = require('path');
-require('dotenv').config();
-const openai = require('openai');
-
-
-
 app.use(cors());
 app.use(express.json());
+
+// Configure OpenAI API
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+// Recreate __dirname and __filename
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Set up storage for uploaded videos
 const storage = multer.diskStorage({
   destination: 'uploads/',
   filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + file.originalname);
+    cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
 const upload = multer({ storage });
-
 
 // Video Upload and Transcription Route
 app.post('/upload', upload.single('video'), (req, res) => {
@@ -74,14 +83,13 @@ app.post('/upload', upload.single('video'), (req, res) => {
   }
 });
 
-
 // Endpoint to handle AI requests
 app.post('/ai-process', async (req, res) => {
   try {
-    const { transcription, requestType } = req.body;
+    const { transcription, requestType, userQuestion } = req.body;
 
     // Call the AI processing function
-    const response = await processAIRequest(transcription, requestType);
+    const response = await processAIRequest(transcription, requestType, userQuestion);
 
     res.json({ response });
   } catch (error) {
@@ -90,10 +98,65 @@ app.post('/ai-process', async (req, res) => {
   }
 });
 
+// Function to process AI requests
+async function processAIRequest(transcription, requestType, userQuestion = '') {
+  let messages = [];
+
+  switch (requestType) {
+    case 'summary':
+      messages.push(
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: `Please provide a concise summary of the following text:\n\n${transcription}` }
+      );
+      break;
+    case 'study_questions':
+      messages.push(
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: `Based on the following text, generate a list of study questions for a student:\n\n${transcription}` }
+      );
+      break;
+    case 'key_ideas':
+      messages.push(
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: `Extract the most important key ideas from the following text:\n\n${transcription}` }
+      );
+      break;
+    case 'custom_question':
+      messages.push(
+        { role: 'system', content: 'You are a helpful assistant.' },
+        { role: 'user', content: `Based on the following text, answer the user's question:\n\nText:\n${transcription}\n\nQuestion:\n${userQuestion}` }
+      );
+      break;
+    default:
+      throw new Error('Invalid request type.');
+  }
+
+  try {
+    // Use the Chat Completion API
+    const response = await openai.chat.completions.create({
+      model: 'gpt-3.5-turbo', // Or 'gpt-4' if you have access
+      messages: messages,
+      max_tokens: 500,
+      temperature: 0.7,
+    });
+
+    // Log the response for debugging
+    console.log('OpenAI API response:', response);
+
+    if (response.choices && response.choices.length > 0) {
+      return response.choices[0].message.content.trim();
+    } else {
+      throw new Error('No choices returned from OpenAI API.');
+    }
+  } catch (error) {
+    console.error('Error in OpenAI API call:', error.message);
+    throw error; // Re-throw the error to be caught in the outer try-catch
+  }
+}
+
 
 // Start the Server
 const PORT = process.env.PORT || 5002;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
-
