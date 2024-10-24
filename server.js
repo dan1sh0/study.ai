@@ -1,6 +1,8 @@
 // server.js
 // At the top of server.js
-
+import User from './models/User.js';
+import Transcription from './models/Transcription.js';
+import Conversation from './models/Conversation.js';
 import express from 'express';
 import cors from 'cors';
 import OpenAI from 'openai';
@@ -39,6 +41,8 @@ const openai = new OpenAI({
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+
+
 // Set up storage for uploaded videos
 const storage = multer.diskStorage({
   destination: 'uploads/',
@@ -47,6 +51,19 @@ const storage = multer.diskStorage({
   },
 });
 const upload = multer({ storage });
+
+
+// Function to get or create a user
+async function getOrCreateUser(userId) {
+  let user = await User.findOne({ userId });
+  if (!user) {
+    user = new User({ userId });
+    await user.save();
+  }
+  return user;
+}
+
+
 
 // Video Upload and Transcription Route
 app.post('/upload', upload.single('video'), (req, res) => {
