@@ -10,12 +10,26 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { spawn } from 'child_process';
+import mongoose from 'mongoose'; 
 
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Configure MongoDB connection 
+const mongoURI = process.env.MONGODB_URI; // Set this in your .env file
+mongoose.connect(mongoURI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('✅ Connected to MongoDB'))
+.catch((err) => {
+  console.error('❌ MongoDB connection error:', err);
+  process.exit(1); // Exit process with failure
+});
+
 
 // Configure OpenAI API
 const openai = new OpenAI({
