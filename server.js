@@ -40,7 +40,7 @@ app.post('/upload', upload.single('video'), (req, res) => {
     const videoPath = path.resolve(req.file.path);
 
     // Call the Python script
-    const pythonExecutable = path.resolve(__dirname, 'venv/bin/python');
+    const pythonExecutable = path.resolve(__dirname, 'venv/bin/python3');
     const pyProcess = spawn(pythonExecutable, ['process_video.py']);
 
     // Send the video path to the Python script
