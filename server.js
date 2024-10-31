@@ -1,6 +1,6 @@
 // server.js
 // At the top of server.js
-import User from './models/User.js';
+import User from './models/Users.js';
 import Transcription from './models/Transcription.js';
 import Conversation from './models/Conversation.js';
 import express from 'express';
@@ -66,7 +66,7 @@ async function getOrCreateUser(userId) {
 
 
 // Video Upload and Transcription Route
-app.post('/upload', upload.single('video'), (req, res) => {
+app.post('/upload', upload.single('video'), async (req, res) => {
   if (req.file) {
     const videoPath = path.resolve(req.file.path);
 
@@ -92,10 +92,35 @@ app.post('/upload', upload.single('video'), (req, res) => {
     });
 
     // Handle process exit
-    pyProcess.on('close', (code) => {
+    pyProcess.on('close', async (code) => {
       if (code === 0) {
         try {
           const result = JSON.parse(output);
+          const userId = req.body.userId
+          if(!userId){
+            return res.status(400).json({ message: 'User ID is required.' });
+          }
+          // Get or create the user
+          await getOrCreateUser(userId);
+
+          // Save the transcription
+          const transcription = new Transcription({
+            userId,
+            videoPath,
+            transcription: result.transcription,
+          });
+          await transcription.save();
+
+          // Initialize conversation history
+          const conversation = new Conversation({
+            userId,
+            messages: [
+              { role: 'system', content: 'You are a helpful assistant.' },
+              { role: 'user', content: `Here is the transcription of the video:\n\n${result.transcription}` },
+            ],
+          });
+          await conversation.save();
+
           res.status(200).json({
             message: 'Video processed successfully',
             transcription: result.transcription,
@@ -114,77 +139,76 @@ app.post('/upload', upload.single('video'), (req, res) => {
   }
 });
 
-// Endpoint to handle AI requests
+/// Endpoint to handle AI requests
 app.post('/ai-process', async (req, res) => {
   try {
-    const { transcription, requestType, userQuestion } = req.body;
+    const { userId, userQuestion } = req.body;
 
-    // Call the AI processing function
-    const response = await processAIRequest(transcription, requestType, userQuestion);
+    if (!userId) {
+      return res.status(400).json({ message: 'User ID is required.' });
+    }
 
-    res.json({ response });
-  } catch (error) {
-    console.error('Error processing AI request:', error);
-    res.status(500).json({ message: 'An error occurred while processing your request.' });
-  }
-});
+    if (!userQuestion) {
+      return res.status(400).json({ message: 'User question is required.' });
+    }
 
-// Function to process AI requests
-async function processAIRequest(transcription, requestType, userQuestion = '') {
-  let messages = [];
+    // Retrieve the latest transcription for the user
+    const transcriptionRecord = await Transcription.findOne({ userId }).sort({ createdAt: -1 });
+    if (!transcriptionRecord) {
+      return res.status(400).json({ message: 'No transcription found for the user. Please upload a video first.' });
+    }
+    const transcription = transcriptionRecord.transcription;
 
-  switch (requestType) {
-    case 'summary':
-      messages.push(
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: `Please provide a concise summary of the following text:\n\n${transcription}` }
-      );
-      break;
-    case 'study_questions':
-      messages.push(
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: `Based on the following text, generate a list of study questions for a student:\n\n${transcription}` }
-      );
-      break;
-    case 'key_ideas':
-      messages.push(
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: `Extract the most important key ideas from the following text:\n\n${transcription}` }
-      );
-      break;
-    case 'custom_question':
-      messages.push(
-        { role: 'system', content: 'You are a helpful assistant.' },
-        { role: 'user', content: `Based on the following text, answer the user's question:\n\nText:\n${transcription}\n\nQuestion:\n${userQuestion}` }
-      );
-      break;
-    default:
-      throw new Error('Invalid request type.');
-  }
+    // Retrieve conversation history
+    let conversation = await Conversation.findOne({ userId });
+    if (!conversation) {
+      // Initialize conversation history if not found
+      conversation = new Conversation({
+        userId,
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: `Here is the transcription of the video:\n\n${transcription}` },
+        ],
+      });
+      await conversation.save();
+    }
 
-  try {
-    // Use the Chat Completion API
+    // Add the user's question to the conversation
+    conversation.messages.push({ role: 'user', content: userQuestion });
+    await conversation.save();
+
+    // Call OpenAI API
     const response = await openai.chat.completions.create({
       model: 'gpt-3.5-turbo', // Or 'gpt-4' if you have access
-      messages: messages,
+      messages: conversation.messages,
       max_tokens: 500,
       temperature: 0.7,
     });
 
-    // Log the response for debugging
     console.log('OpenAI API response:', response);
 
     if (response.choices && response.choices.length > 0) {
-      return response.choices[0].message.content.trim();
+      const assistantMessage = response.choices[0].message.content.trim();
+      // Add the assistant's response to the conversation
+      conversation.messages.push({ role: 'assistant', content: assistantMessage });
+      await conversation.save();
+
+      res.json({ response: assistantMessage });
     } else {
       throw new Error('No choices returned from OpenAI API.');
     }
   } catch (error) {
-    console.error('Error in OpenAI API call:', error.message);
-    throw error; // Re-throw the error to be caught in the outer try-catch
-  }
-}
+    console.error('Error processing AI request:', error.message);
 
+    if (error.message.includes('No transcription found')) {
+      res.status(400).json({ message: error.message });
+    } else if (error.code === 'insufficient_quota') {
+      res.status(429).json({ message: 'You have exceeded your API quota. Please check your OpenAI billing details.' });
+    } else {
+      res.status(500).json({ message: 'An error occurred while processing your request.' });
+    }
+  }
+});
 
 // Start the Server
 const PORT = process.env.PORT || 5002;
